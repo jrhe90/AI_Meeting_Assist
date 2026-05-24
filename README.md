@@ -22,15 +22,15 @@ The xcframework build takes a few minutes and only needs to be redone when `Vend
 
 ### Whisper model
 
-Until the in-app downloader lands (build step 11), drop the model in place manually. The app is sandboxed, so the model has to live under the sandbox container — not under your home Application Support:
+The first-run onboarding wizard downloads `ggml-small.en.bin` (~466 MB) into the sandbox container and resumes if interrupted. Nothing to do manually.
 
-```sh
-MODELS=~/Library/Containers/com.ainotetaker.app/Data/Library/Application\ Support/AINoteTaker/models
-mkdir -p "$MODELS"
-curl -L --progress-bar \
-  -o "$MODELS/ggml-small.en.bin" \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+If you'd rather drop it in by hand (e.g. air-gapped install), put it here:
+
 ```
+~/Library/Containers/com.ainotetaker.app/Data/Library/Application Support/AINoteTaker/models/ggml-small.en.bin
+```
+
+The wizard detects an existing file by size and skips the download.
 
 ## Subsequent builds
 

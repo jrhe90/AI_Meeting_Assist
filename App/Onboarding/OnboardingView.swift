@@ -1,8 +1,10 @@
 import AppKit
 import SwiftUI
+import Transcription
 
 struct OnboardingView: View {
     @Bindable var model: OnboardingViewModel
+    @State private var downloader = WhisperModelDownloader(destinationURL: AppPaths.whisperModelURL)
     let onFinish: () -> Void
 
     var body: some View {
@@ -21,6 +23,11 @@ struct OnboardingView: View {
             .padding(16)
         }
         .frame(minWidth: 520, minHeight: 420)
+        .onChange(of: model.step) { _, newStep in
+            if newStep == .modelDownload && downloader.status == .idle {
+                downloader.start()
+            }
+        }
     }
 
     @ViewBuilder
@@ -29,6 +36,7 @@ struct OnboardingView: View {
         case .welcome: WelcomePane()
         case .microphone: MicrophonePane(model: model)
         case .screenRecording: ScreenRecordingPane(model: model)
+        case .modelDownload: ModelDownloadPane(downloader: downloader)
         case .done: DonePane()
         }
     }
@@ -81,6 +89,22 @@ struct OnboardingView: View {
                 Button("Continue") { model.advance() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
+            }
+
+        case .modelDownload:
+            switch downloader.status {
+            case .completed:
+                Button("Continue") { model.advance() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            case .failed:
+                Button("Retry") { downloader.retry() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            case .idle, .checking, .downloading:
+                Button("Working…") {}
+                    .buttonStyle(.borderedProminent)
+                    .disabled(true)
             }
 
         case .done:
@@ -153,6 +177,69 @@ private struct ScreenRecordingPane: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ModelDownloadPane: View {
+    let downloader: WhisperModelDownloader
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Download the speech model", systemImage: "square.and.arrow.down")
+                .font(.title).bold()
+
+            Text("AI Note Taker uses whisper.cpp's small.en model to transcribe meetings on-device. The model is about \(Self.expectedMBString) and downloads once.")
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch downloader.status {
+        case .idle, .checking:
+            Label("Checking for existing download…", systemImage: "hourglass")
+                .foregroundStyle(.secondary)
+        case .downloading:
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressView(value: downloader.fractionComplete) {
+                    Text(progressLabel).font(.callout).foregroundStyle(.secondary)
+                }
+                .progressViewStyle(.linear)
+                Text("Downloads can be paused — closing the wizard will resume next time you open it.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+        case .completed:
+            Label("Model ready", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Download failed", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(message).font(.callout).foregroundStyle(.secondary)
+                Text("Check your network connection and click Retry below.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var progressLabel: String {
+        let received = Self.formatMB(downloader.bytesReceived)
+        let total = downloader.totalBytes > 0
+            ? Self.formatMB(downloader.totalBytes)
+            : Self.formatMB(WhisperModelDownloader.expectedBytes)
+        let pct = Int((downloader.fractionComplete * 100).rounded())
+        return "\(received) of \(total) (\(pct)%)"
+    }
+
+    private static var expectedMBString: String {
+        formatMB(WhisperModelDownloader.expectedBytes)
+    }
+
+    private static func formatMB(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1_048_576.0
+        return String(format: "%.0f MB", mb)
     }
 }
 

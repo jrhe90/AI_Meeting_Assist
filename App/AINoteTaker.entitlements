@@ -6,5 +6,9 @@
     <true/>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Required for in-app whisper model download (step 11). Stays on
+         after onboarding to support future Claude API opt-in (PLAN §3). -->
+    <key>com.apple.security.network.client</key>
+    <true/>
 </dict>
 </plist>

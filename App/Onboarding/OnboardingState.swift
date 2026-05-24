@@ -17,6 +17,7 @@ public enum OnboardingStep: Int, CaseIterable, Sendable {
     case welcome
     case microphone
     case screenRecording
+    case modelDownload
     case done
 
     public var next: OnboardingStep? {

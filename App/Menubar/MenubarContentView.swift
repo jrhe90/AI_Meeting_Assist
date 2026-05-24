@@ -1,10 +1,13 @@
 import AppKit
 import AudioCapture
+import SharedKit
 import SwiftUI
+import Transcription
 
 struct MenubarContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var spike = SpikeController()
+    @State private var transcribe = TranscribeController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -47,6 +50,7 @@ struct MenubarContentView: View {
             #if DEBUG
             Divider()
             SpikeDebugRow(spike: spike)
+            TranscribeDebugRow(transcribe: transcribe)
             #endif
 
             Button {
@@ -124,6 +128,112 @@ final class SpikeController {
 
     func reset() {
         state = .idle
+    }
+}
+
+@MainActor
+@Observable
+final class TranscribeController {
+    enum State: Equatable {
+        case idle
+        case running
+        case done(segments: Int, preview: String)
+        case error(String)
+    }
+
+    private(set) var state: State = .idle
+
+    /// Where step 11 will eventually drop the auto-downloaded model. For now
+    /// the user supplies this path manually via the curl command in the README.
+    private var modelURL: URL {
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return support.appendingPathComponent("AINoteTaker/models/ggml-small.en.bin")
+    }
+
+    func transcribeLastSpike() {
+        state = .running
+        Task {
+            do {
+                guard let wav = try Self.findMostRecentSystemWAV() else {
+                    await MainActor.run {
+                        self.state = .error("No spike WAV found — run a capture spike first.")
+                    }
+                    return
+                }
+                let engine = WhisperEngine(modelURL: modelURL)
+                let segments = try await engine.transcribe(wavURL: wav, side: .others)
+                let preview = segments.prefix(3).map(\.text).joined(separator: " ")
+                let fullText = segments.map(\.text).joined(separator: " ")
+                Log.whisper.info("Transcript: \(fullText, privacy: .public)")
+                await MainActor.run {
+                    self.state = .done(segments: segments.count, preview: preview)
+                }
+            } catch {
+                await MainActor.run { self.state = .error(error.localizedDescription) }
+            }
+        }
+    }
+
+    func reset() { state = .idle }
+
+    private static func findMostRecentSystemWAV() throws -> URL? {
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let spikeDir = support.appendingPathComponent("AINoteTaker/spike", isDirectory: true)
+
+        guard FileManager.default.fileExists(atPath: spikeDir.path) else { return nil }
+
+        let runs = try FileManager.default
+            .contentsOfDirectory(at: spikeDir, includingPropertiesForKeys: [.contentModificationDateKey])
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }
+
+        for run in runs {
+            let candidate = run.appendingPathComponent("system.wav")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+}
+
+private struct TranscribeDebugRow: View {
+    let transcribe: TranscribeController
+
+    var body: some View {
+        switch transcribe.state {
+        case .idle:
+            Button { transcribe.transcribeLastSpike() } label: {
+                Label("Transcribe last spike", systemImage: "text.quote")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        case .running:
+            Label("Transcribing…", systemImage: "hourglass").foregroundStyle(.secondary)
+        case .done(let count, let preview):
+            VStack(alignment: .leading, spacing: 4) {
+                Label("\(count) segments", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                if !preview.isEmpty {
+                    Text(preview).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+                Button("Dismiss") { transcribe.reset() }.buttonStyle(.borderless)
+            }
+        case .error(let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Transcribe failed", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                Button("Reset") { transcribe.reset() }.buttonStyle(.borderless)
+            }
+        }
     }
 }
 

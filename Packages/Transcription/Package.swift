@@ -11,9 +11,16 @@ let package = Package(
         .package(path: "../SharedKit"),
     ],
     targets: [
+        // Built from Vendor/whisper.cpp via build-xcframework.sh — see README.
+        // The xcframework lives outside the package so the repo doesn't bloat
+        // with prebuilt binaries; rebuild it whenever whisper.cpp is bumped.
+        .binaryTarget(
+            name: "whisper",
+            path: "../../Vendor/whisper.cpp/build-apple/whisper.xcframework"
+        ),
         .target(
             name: "Transcription",
-            dependencies: ["SharedKit"]
+            dependencies: ["SharedKit", "whisper"]
         ),
         .testTarget(
             name: "TranscriptionTests",

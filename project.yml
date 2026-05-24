@@ -1,0 +1,90 @@
+name: AINoteTaker
+
+options:
+  bundleIdPrefix: com.ainotetaker
+  deploymentTarget:
+    macOS: "26.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    SUPPORTED_PLATFORMS: macosx
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    # Leave DEVELOPMENT_TEAM unset; user fills in via Xcode "Signing & Capabilities".
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  SharedKit:
+    path: Packages/SharedKit
+  AudioCapture:
+    path: Packages/AudioCapture
+  Transcription:
+    path: Packages/Transcription
+  Summarization:
+    path: Packages/Summarization
+  Storage:
+    path: Packages/Storage
+
+targets:
+  AINoteTaker:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - "**/.gitkeep"
+          - "Info.plist"
+          - "AINoteTaker.entitlements"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: en
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "26.0"
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "AI Note Taker uses your microphone to capture your side of meetings. Audio is processed entirely on your device."
+        NSScreenCaptureUsageDescription: "AI Note Taker captures system audio so it can transcribe what other participants say. No video is recorded and audio never leaves your device."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ainotetaker.app
+        PRODUCT_NAME: AINoteTaker
+        CODE_SIGN_ENTITLEMENTS: App/AINoteTaker.entitlements
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - package: SharedKit
+        product: SharedKit
+      - package: AudioCapture
+        product: AudioCapture
+      - package: Transcription
+        product: Transcription
+      - package: Summarization
+        product: Summarization
+      - package: Storage
+        product: Storage
+
+schemes:
+  AINoteTaker:
+    build:
+      targets:
+        AINoteTaker: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

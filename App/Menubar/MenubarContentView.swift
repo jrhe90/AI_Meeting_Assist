@@ -5,6 +5,7 @@ import SwiftUI
 import Transcription
 
 struct MenubarContentView: View {
+    let session: MeetingSession
     @Environment(\.openWindow) private var openWindow
     @State private var spike = SpikeController()
     @State private var transcribe = TranscribeController()
@@ -18,14 +19,7 @@ struct MenubarContentView: View {
                 Text("AI Note Taker").font(.headline)
             }
 
-            Button {
-                // TODO(step 5): start dual-stream capture + streaming transcription.
-            } label: {
-                Label("Start meeting", systemImage: "record.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(true)
+            meetingButton
 
             Divider()
 
@@ -64,6 +58,44 @@ struct MenubarContentView: View {
         }
         .padding(12)
         .frame(width: 240)
+    }
+
+    @ViewBuilder
+    private var meetingButton: some View {
+        switch session.state {
+        case .idle, .error:
+            Button {
+                openWindow(id: WindowID.liveMeeting)
+                NSApp.activate(ignoringOtherApps: true)
+                session.start()
+            } label: {
+                Label("Start meeting", systemImage: "record.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+        case .starting:
+            Button {} label: {
+                Label("Starting…", systemImage: "hourglass")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(true)
+        case .running:
+            Button(role: .destructive) {
+                session.stop()
+            } label: {
+                Label("Stop meeting", systemImage: "stop.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+        case .stopping:
+            Button {} label: {
+                Label("Stopping…", systemImage: "hourglass")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(true)
+        }
     }
 }
 
@@ -281,5 +313,5 @@ private struct SpikeDebugRow: View {
 #endif
 
 #Preview {
-    MenubarContentView()
+    MenubarContentView(session: MeetingSession(modelURL: AppPaths.whisperModelURL))
 }

@@ -40,11 +40,22 @@ public actor WhisperEngine: Transcribing {
     }
 
     public func transcribe(wavURL: URL, side: SpeakerSide) async throws -> [TranscriptSegment] {
-        if ctx == nil { try load() }
-        guard let ctx else { throw TranscriptionError.loadFailed(reason: "context unavailable after load") }
-
         let pcm = try Self.readAndResample(url: wavURL)
         Log.whisper.info("Transcribing \(wavURL.lastPathComponent, privacy: .public): \(pcm.count, privacy: .public) samples at 16kHz")
+        return try transcribeRaw(samples: pcm, side: side, baseTime: 0)
+    }
+
+    /// Transcribe a chunk of already-resampled 16 kHz mono Float32 samples.
+    /// Used by `StreamingTranscriber`, which does its own format conversion.
+    /// `baseTime` shifts the segment timestamps so chunks line up on the
+    /// caller's clock instead of always starting at 0.
+    public func transcribeRaw(
+        samples: [Float],
+        side: SpeakerSide,
+        baseTime: TimeInterval
+    ) throws -> [TranscriptSegment] {
+        if ctx == nil { try load() }
+        guard let ctx else { throw TranscriptionError.loadFailed(reason: "context unavailable after load") }
 
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         params.print_progress = false
@@ -57,7 +68,7 @@ public actor WhisperEngine: Transcribing {
         params.suppress_blank = true
         params.language = ("en" as NSString).utf8String
 
-        let status = pcm.withUnsafeBufferPointer { buf -> Int32 in
+        let status = samples.withUnsafeBufferPointer { buf -> Int32 in
             whisper_full(ctx, params, buf.baseAddress, Int32(buf.count))
         }
         guard status == 0 else {
@@ -75,12 +86,11 @@ public actor WhisperEngine: Transcribing {
             guard !text.isEmpty else { continue }
             segments.append(TranscriptSegment(
                 side: side,
-                start: TimeInterval(t0) / 100.0,
-                end: TimeInterval(t1) / 100.0,
+                start: baseTime + TimeInterval(t0) / 100.0,
+                end: baseTime + TimeInterval(t1) / 100.0,
                 text: text
             ))
         }
-        Log.whisper.info("Produced \(segments.count, privacy: .public) segments")
         return segments
     }
 

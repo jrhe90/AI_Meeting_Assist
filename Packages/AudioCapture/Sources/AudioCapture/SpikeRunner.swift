@@ -23,6 +23,8 @@ public actor SpikeRunner {
     private var directory: URL?
     private var startedAt: Date?
     private var mode: Mode = .dual
+    private var micWriter: WAVFileWriter?
+    private var systemWriter: WAVFileWriter?
 
     public init() {}
 
@@ -39,18 +41,36 @@ public actor SpikeRunner {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let systemURL = dir.appendingPathComponent("system.wav")
+        let systemWriter = WAVFileWriter(url: systemURL)
+        self.systemWriter = systemWriter
 
         Log.audio.info("Spike starting in \(dir.path, privacy: .public) mode=\(String(describing: mode), privacy: .public)")
 
         if mode == .dual {
             let micURL = dir.appendingPathComponent("mic.wav")
-            try await mic.start(writingTo: micURL)
+            let micWriter = WAVFileWriter(url: micURL)
+            self.micWriter = micWriter
+            try await mic.start { buffer in
+                do {
+                    try micWriter.write(buffer)
+                } catch {
+                    Log.audio.error("Mic write failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
         }
 
         do {
-            try await system.start(writingTo: systemURL)
+            try await system.start { buffer in
+                do {
+                    try systemWriter.write(buffer)
+                } catch {
+                    Log.audio.error("System audio write failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
         } catch {
-            if mode == .dual { _ = try? await mic.stop() }
+            if mode == .dual { try? await mic.stop() }
+            self.micWriter = nil
+            self.systemWriter = nil
             throw error
         }
 
@@ -61,26 +81,43 @@ public actor SpikeRunner {
     }
 
     public func stop() async throws -> Output {
-        guard let dir = directory, let started = startedAt else {
+        guard let dir = directory, let started = startedAt,
+              let systemWriter = systemWriter
+        else {
             throw AudioCaptureError.streamFailed(underlying: SpikeError.notStarted)
         }
 
         let currentMode = mode
 
-        // Stop both (when applicable) even if one throws so we never leak a stream.
-        let systemResultTask: Task<CaptureResult, Error> = Task { try await self.system.stop() }
-        let micResultTask: Task<CaptureResult, Error>? = (currentMode == .dual)
-            ? Task { try await self.mic.stop() }
-            : nil
+        // Stop streams first, then close writers and snapshot their counts.
+        try await system.stop()
+        if currentMode == .dual { try? await mic.stop() }
 
-        let systemResult = try await systemResultTask.value
-        let micResult = try await micResultTask?.value
+        systemWriter.close()
+        micWriter?.close()
+
+        let systemResult = CaptureResult(
+            url: systemWriter.url,
+            sampleCount: systemWriter.sampleCount,
+            sampleRate: systemWriter.actualSampleRate,
+            channelCount: systemWriter.actualChannelCount
+        )
+        let micResult = micWriter.map { writer in
+            CaptureResult(
+                url: writer.url,
+                sampleCount: writer.sampleCount,
+                sampleRate: writer.actualSampleRate,
+                channelCount: writer.actualChannelCount
+            )
+        }
 
         let wallDuration = Date().timeIntervalSince(started)
         Self.logSmokeReport(wall: wallDuration, mic: micResult, system: systemResult)
 
         directory = nil
         startedAt = nil
+        self.micWriter = nil
+        self.systemWriter = nil
         return Output(directory: dir, mic: micResult, system: systemResult)
     }
 

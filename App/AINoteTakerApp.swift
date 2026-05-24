@@ -4,13 +4,14 @@ import SwiftUI
 @main
 struct AINoteTakerApp: App {
     @Environment(\.openWindow) private var openWindow
+    @State private var session = MeetingSession(modelURL: AppPaths.whisperModelURL)
 
     var body: some Scene {
         MenuBarExtra {
-            MenubarContentView()
+            MenubarContentView(session: session)
         } label: {
-            // System image flips when recording (wired up at step 5).
-            Image(systemName: "waveform")
+            // Icon flips to a filled record dot while a meeting is running.
+            Image(systemName: session.state == .running ? "record.circle.fill" : "waveform")
         }
         .menuBarExtraStyle(.window)
 
@@ -24,6 +25,11 @@ struct AINoteTakerApp: App {
         }
         .windowResizability(.contentSize)
         .windowToolbarStyle(.unified(showsTitle: false))
+
+        Window("Live Meeting", id: WindowID.liveMeeting) {
+            LiveMeetingView(session: session)
+        }
+        .defaultSize(width: 640, height: 480)
     }
 }
 
@@ -31,6 +37,20 @@ enum WindowID {
     static let library = "library"
     static let meetingDetail = "meeting-detail"
     static let onboarding = "onboarding"
+    static let liveMeeting = "live-meeting"
+}
+
+/// Canonical filesystem paths the app reads/writes. Centralised so the in-app
+/// downloader (build step 11) can hand back the same URL the engine reads.
+enum AppPaths {
+    static var whisperModelURL: URL {
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return support
+            .appendingPathComponent("AINoteTaker/models", isDirectory: true)
+            .appendingPathComponent("ggml-small.en.bin")
+    }
 }
 
 /// Hosts `OnboardingView` and owns the view model. Self-dismisses when finished

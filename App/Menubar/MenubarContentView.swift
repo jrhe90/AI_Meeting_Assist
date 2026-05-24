@@ -5,6 +5,8 @@ struct MenubarContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            FirstLaunchPresenter()
+
             HStack(spacing: 6) {
                 Image(systemName: "waveform")
                 Text("AI Note Taker").font(.headline)
@@ -26,6 +28,15 @@ struct MenubarContentView: View {
                 NSApp.activate(ignoringOtherApps: true)
             } label: {
                 Label("Open library", systemImage: "list.bullet.rectangle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                openWindow(id: WindowID.onboarding)
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Show welcome…", systemImage: "questionmark.circle")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)

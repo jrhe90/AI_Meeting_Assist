@@ -1,14 +1,38 @@
 import AppKit
+import SharedKit
+import Storage
+import SwiftData
 import SwiftUI
 
 @main
 struct AINoteTakerApp: App {
     @Environment(\.openWindow) private var openWindow
-    @State private var session = MeetingSession(modelURL: AppPaths.whisperModelURL)
+    @State private var session: MeetingSession
+
+    private let container: ModelContainer
+
+    init() {
+        let schema = Schema(StorageSchema.models)
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let resolvedContainer: ModelContainer
+        do {
+            resolvedContainer = try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            Log.storage.fault("Failed to create ModelContainer: \(error.localizedDescription, privacy: .public)")
+            fatalError("Failed to create ModelContainer: \(error)")
+        }
+        self.container = resolvedContainer
+        let context = ModelContext(resolvedContainer)
+        _session = State(initialValue: MeetingSession(
+            modelURL: AppPaths.whisperModelURL,
+            modelContext: context
+        ))
+    }
 
     var body: some Scene {
         MenuBarExtra {
             MenubarContentView(session: session)
+                .modelContainer(container)
         } label: {
             // Icon flips to a filled record dot while a meeting is running.
             Image(systemName: session.state == .running ? "record.circle.fill" : "waveform")
@@ -17,6 +41,7 @@ struct AINoteTakerApp: App {
 
         Window("Library", id: WindowID.library) {
             LibraryView()
+                .modelContainer(container)
         }
         .defaultSize(width: 800, height: 520)
 
@@ -28,6 +53,7 @@ struct AINoteTakerApp: App {
 
         Window("Live Meeting", id: WindowID.liveMeeting) {
             LiveMeetingView(session: session)
+                .modelContainer(container)
         }
         .defaultSize(width: 640, height: 480)
     }

@@ -2,6 +2,8 @@ import AudioCapture
 import Foundation
 import Observation
 import SharedKit
+import Storage
+import SwiftData
 import Transcription
 
 /// Drives a live meeting: spins up both capture pipelines, pipes their PCM
@@ -26,6 +28,7 @@ public final class MeetingSession {
     public private(set) var startedAt: Date?
 
     private let modelURL: URL
+    private let modelContext: ModelContext
     private let mic = MicCapture()
     private let system = SystemAudioCapture()
     private var engine: WhisperEngine?
@@ -36,9 +39,11 @@ public final class MeetingSession {
     private var hasMic: Bool = false
     private let micResampler = PCMResampler()
     private let systemResampler = PCMResampler()
+    private var currentMeeting: Meeting?
 
-    public init(modelURL: URL) {
+    public init(modelURL: URL, modelContext: ModelContext) {
         self.modelURL = modelURL
+        self.modelContext = modelContext
     }
 
     public func start() {
@@ -58,7 +63,16 @@ public final class MeetingSession {
     private func startInternal() async {
         do {
             segments.removeAll()
-            startedAt = Date()
+            let started = Date()
+            startedAt = started
+
+            let meeting = Meeting(
+                title: defaultTitle(for: started),
+                startedAt: started
+            )
+            modelContext.insert(meeting)
+            try? modelContext.save()
+            currentMeeting = meeting
 
             let engine = WhisperEngine(modelURL: modelURL)
             try await engine.load()
@@ -126,6 +140,12 @@ public final class MeetingSession {
         micConsumer = nil
         engine = nil
         hasMic = false
+
+        if let meeting = currentMeeting {
+            meeting.endedAt = Date()
+            try? modelContext.save()
+        }
+        currentMeeting = nil
     }
 
     private func append(segment: TranscriptSegment) {
@@ -133,5 +153,27 @@ public final class MeetingSession {
         // when mic and system chunks finish out of order.
         let insertIndex = segments.firstIndex(where: { $0.start > segment.start }) ?? segments.endIndex
         segments.insert(segment, at: insertIndex)
+
+        // Persist to SwiftData. The relationship inverse on `meeting` means
+        // assigning here is enough — the segment auto-appears under Meeting.
+        if let meeting = currentMeeting {
+            let stored = StoredTranscriptSegment(
+                id: segment.id,
+                side: segment.side,
+                start: segment.start,
+                end: segment.end,
+                text: segment.text
+            )
+            stored.meeting = meeting
+            modelContext.insert(stored)
+            try? modelContext.save()
+        }
+    }
+
+    private func defaultTitle(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "Meeting on \(formatter.string(from: date))"
     }
 }

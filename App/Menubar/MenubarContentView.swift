@@ -1,6 +1,8 @@
 import AppKit
 import AudioCapture
 import SharedKit
+import Storage
+import SwiftData
 import SwiftUI
 import Transcription
 
@@ -313,5 +315,11 @@ private struct SpikeDebugRow: View {
 #endif
 
 #Preview {
-    MenubarContentView(session: MeetingSession(modelURL: AppPaths.whisperModelURL))
+    let schema = Schema(StorageSchema.models)
+    let container = try! ModelContainer(for: schema,
+        configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+    return MenubarContentView(session: MeetingSession(
+        modelURL: AppPaths.whisperModelURL,
+        modelContext: ModelContext(container)
+    ))
 }

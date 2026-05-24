@@ -109,6 +109,20 @@ public enum MarkdownExporter {
         return lines.joined(separator: "\n")
     }
 
+    /// Remove the exported `.md` for this meeting, if one exists. Best-effort:
+    /// any FS error is logged but not surfaced.
+    @MainActor
+    public static func deleteExport(for meeting: Meeting) {
+        let url = exportDirectory.appendingPathComponent(filename(for: meeting))
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+            Log.storage.info("Deleted export \(url.path, privacy: .public)")
+        } catch {
+            Log.storage.error("Failed to delete export: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private static func filename(for meeting: Meeting) -> String {
         let dateFmt = DateFormatter()
         dateFmt.dateFormat = "yyyy-MM-dd"

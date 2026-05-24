@@ -50,25 +50,49 @@ public struct GeneratedTopic {
 /// without entitlement, etc.) `summarize` throws `SummarizationError.modelUnavailable`
 /// so the meeting still finalises cleanly without a summary.
 public final class FoundationModelsSummarizer: Summarizing {
-    public init() {}
+    /// Rough character budget per chunk. The on-device model context is
+    /// nominally ~4 k tokens — keeping each chunk under ~3 000 characters
+    /// (~750 tokens) leaves plenty of room for instructions and the
+    /// @Generable schema overhead.
+    private let chunkCharBudget: Int
+
+    public init(chunkCharBudget: Int = 3_000) {
+        self.chunkCharBudget = chunkCharBudget
+    }
 
     public func summarize(_ segments: [TranscriptSegment]) async throws -> MeetingSummary {
-        let model = SystemLanguageModel.default
-        switch model.availability {
-        case .available:
-            break
-        case .unavailable(let reason):
-            Log.summary.warning("FoundationModels unavailable: \(String(describing: reason), privacy: .public)")
-            throw SummarizationError.modelUnavailable
-        @unknown default:
-            throw SummarizationError.modelUnavailable
+        try Self.assertModelAvailable()
+
+        let sorted = segments.sorted { $0.start < $1.start }
+        let chunks = Self.chunk(sorted, charBudget: chunkCharBudget)
+        Log.summary.info("Summarizing \(sorted.count, privacy: .public) segments in \(chunks.count, privacy: .public) chunk(s)")
+
+        guard !chunks.isEmpty else {
+            return MeetingSummary(tldr: "No speech was captured.", decisions: [], actionItems: [], topics: [])
         }
 
+        if chunks.count == 1 {
+            return try await summarizeChunk(chunks[0])
+        }
+
+        // Hierarchical: summarize each chunk, then ask the model to merge
+        // the partials. Keeps each FM call comfortably under the context window.
+        var partials: [MeetingSummary] = []
+        partials.reserveCapacity(chunks.count)
+        for (index, chunk) in chunks.enumerated() {
+            Log.summary.info("Summarizing chunk \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
+            let partial = try await summarizeChunk(chunk)
+            partials.append(partial)
+        }
+        return try await mergePartials(partials)
+    }
+
+    // MARK: - Chunk-level summarization
+
+    private func summarizeChunk(_ segments: [TranscriptSegment]) async throws -> MeetingSummary {
         let transcript = Self.formatTranscript(segments)
         guard !transcript.isEmpty else {
-            // Empty transcript still yields a clean summary so the meeting
-            // detail view doesn't crash when opened.
-            return MeetingSummary(tldr: "No speech was captured.", decisions: [], actionItems: [], topics: [])
+            return MeetingSummary(tldr: "", decisions: [], actionItems: [], topics: [])
         }
 
         let instructions = """
@@ -80,7 +104,7 @@ public final class FoundationModelsSummarizer: Summarizing {
         it, return an empty list.
         """
 
-        let session = LanguageModelSession(model: model, instructions: instructions)
+        let session = LanguageModelSession(model: .default, instructions: instructions)
 
         do {
             let response = try await session.respond(
@@ -94,17 +118,131 @@ public final class FoundationModelsSummarizer: Summarizing {
         }
     }
 
+    // MARK: - Merging partial summaries
+
+    private func mergePartials(_ partials: [MeetingSummary]) async throws -> MeetingSummary {
+        let prompt = Self.formatPartialSummaries(partials)
+
+        let instructions = """
+        You are merging partial summaries of one meeting that was processed
+        in chunks. Produce a single unified summary: combine the chunk
+        TL;DRs into a coherent 1-3 sentence overview, deduplicate decisions
+        and action items, and merge topics that overlap (similar titles or
+        bullets) while preserving distinct ones. Do not invent content that
+        is not present in the partial summaries.
+        """
+
+        let session = LanguageModelSession(model: .default, instructions: instructions)
+
+        do {
+            let response = try await session.respond(
+                to: "Merge these partial summaries into one final meeting summary:\n\n\(prompt)",
+                generating: GeneratedMeetingSummary.self
+            )
+            return Self.translate(response.content)
+        } catch {
+            Log.summary.error("Merge step failed, falling back to naive union: \(error.localizedDescription, privacy: .public)")
+            // Best-effort fallback so the user still gets *something* if the
+            // merge call fails — concatenate TL;DRs, union the rest.
+            return Self.naiveMerge(partials)
+        }
+    }
+
+    private static func naiveMerge(_ partials: [MeetingSummary]) -> MeetingSummary {
+        let tldr = partials.map(\.tldr).filter { !$0.isEmpty }.joined(separator: " ")
+        let decisions = Array(NSOrderedSet(array: partials.flatMap(\.decisions))) as? [String] ?? []
+        let actionItems = partials.flatMap(\.actionItems)
+        let topics = partials.flatMap(\.topics)
+        return MeetingSummary(
+            tldr: tldr,
+            decisions: decisions,
+            actionItems: actionItems,
+            topics: topics
+        )
+    }
+
     // MARK: - Helpers
 
+    private static func assertModelAvailable() throws {
+        let model = SystemLanguageModel.default
+        switch model.availability {
+        case .available:
+            return
+        case .unavailable(let reason):
+            Log.summary.warning("FoundationModels unavailable: \(String(describing: reason), privacy: .public)")
+            throw SummarizationError.modelUnavailable
+        @unknown default:
+            throw SummarizationError.modelUnavailable
+        }
+    }
+
     private static func formatTranscript(_ segments: [TranscriptSegment]) -> String {
-        segments
-            .sorted { $0.start < $1.start }
-            .map { seg -> String in
-                let tag = seg.side == .me ? "Me" : "Others"
-                let ts = String(format: "%02d:%02d", Int(seg.start) / 60, Int(seg.start) % 60)
-                return "[\(ts) \(tag)] \(seg.text)"
+        segments.map { seg -> String in
+            let tag = seg.side == .me ? "Me" : "Others"
+            let ts = String(format: "%02d:%02d", Int(seg.start) / 60, Int(seg.start) % 60)
+            return "[\(ts) \(tag)] \(seg.text)"
+        }
+        .joined(separator: "\n")
+    }
+
+    private static func formatPartialSummaries(_ partials: [MeetingSummary]) -> String {
+        partials.enumerated().map { (index, partial) -> String in
+            var lines: [String] = []
+            lines.append("--- Partial \(index + 1) ---")
+            if !partial.tldr.isEmpty { lines.append("TL;DR: \(partial.tldr)") }
+            if !partial.decisions.isEmpty {
+                lines.append("Decisions:")
+                for d in partial.decisions { lines.append("- \(d)") }
             }
-            .joined(separator: "\n")
+            if !partial.actionItems.isEmpty {
+                lines.append("Action items:")
+                for a in partial.actionItems {
+                    var line = "- \(a.description)"
+                    if let assignee = a.assignee, !assignee.isEmpty { line += " (owner: \(assignee))" }
+                    if let due = a.dueDate, !due.isEmpty { line += " (due: \(due))" }
+                    lines.append(line)
+                }
+            }
+            if !partial.topics.isEmpty {
+                lines.append("Topics:")
+                for t in partial.topics {
+                    lines.append("- \(t.title)")
+                    for b in t.bullets { lines.append("  • \(b)") }
+                }
+            }
+            return lines.joined(separator: "\n")
+        }
+        .joined(separator: "\n\n")
+    }
+
+    /// Splits sorted segments into chunks whose formatted-transcript length
+    /// stays under `charBudget`. A single oversized segment lands in its own
+    /// chunk rather than being split — that keeps timestamps intact.
+    private static func chunk(_ segments: [TranscriptSegment], charBudget: Int) -> [[TranscriptSegment]] {
+        guard !segments.isEmpty else { return [] }
+
+        var chunks: [[TranscriptSegment]] = []
+        var current: [TranscriptSegment] = []
+        var currentChars = 0
+
+        for seg in segments {
+            let segChars = formatSegmentLength(seg)
+            if !current.isEmpty && currentChars + segChars > charBudget {
+                chunks.append(current)
+                current = []
+                currentChars = 0
+            }
+            current.append(seg)
+            currentChars += segChars
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
+    }
+
+    private static func formatSegmentLength(_ seg: TranscriptSegment) -> Int {
+        // Mirror of formatTranscript's per-segment output:
+        // "[mm:ss Tag] text\n"  — 12 chars of framing + text length.
+        12 + seg.text.count
     }
 
     private static func translate(_ generated: GeneratedMeetingSummary) -> MeetingSummary {

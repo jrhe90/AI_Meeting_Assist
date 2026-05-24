@@ -97,6 +97,13 @@ struct MenubarContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(true)
+        case .summarizing:
+            Button {} label: {
+                Label("Summarizing…", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(true)
         }
     }
 }

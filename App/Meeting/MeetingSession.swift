@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import SharedKit
 import Storage
+import Summarization
 import SwiftData
 import Transcription
 
@@ -20,6 +21,7 @@ public final class MeetingSession {
         case starting
         case running
         case stopping
+        case summarizing
         case error(String)
     }
 
@@ -141,11 +143,51 @@ public final class MeetingSession {
         engine = nil
         hasMic = false
 
-        if let meeting = currentMeeting {
+        let endedMeeting = currentMeeting
+        if let meeting = endedMeeting {
             meeting.endedAt = Date()
             try? modelContext.save()
         }
+
+        // Generate the summary on a frozen snapshot of segments so the meeting
+        // record persists even if summarization fails.
+        if let meeting = endedMeeting, !segments.isEmpty {
+            state = .summarizing
+            await summarizeAndPersist(meeting: meeting, segments: segments)
+        }
+
         currentMeeting = nil
+    }
+
+    private func summarizeAndPersist(meeting: Meeting, segments: [TranscriptSegment]) async {
+        do {
+            let summarizer = FoundationModelsSummarizer()
+            let summary = try await summarizer.summarize(segments)
+            attach(summary: summary, to: meeting)
+            try? modelContext.save()
+            Log.summary.info("Persisted summary for meeting \(meeting.id.uuidString, privacy: .public)")
+        } catch SummarizationError.modelUnavailable {
+            Log.summary.warning("Skipping summary — FoundationModels not available on this build")
+        } catch {
+            Log.summary.error("Summary generation failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func attach(summary: MeetingSummary, to meeting: Meeting) {
+        let stored = StoredSummary(tldr: summary.tldr, decisions: summary.decisions)
+        stored.meeting = meeting
+        modelContext.insert(stored)
+
+        for item in summary.actionItems {
+            let storedItem = StoredActionItem(detail: item.description, assignee: item.assignee, dueDate: item.dueDate)
+            storedItem.summary = stored
+            modelContext.insert(storedItem)
+        }
+        for topic in summary.topics {
+            let storedTopic = StoredTopic(title: topic.title, bullets: topic.bullets)
+            storedTopic.summary = stored
+            modelContext.insert(storedTopic)
+        }
     }
 
     private func append(segment: TranscriptSegment) {

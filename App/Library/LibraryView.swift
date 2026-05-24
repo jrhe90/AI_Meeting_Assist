@@ -4,23 +4,36 @@ import SwiftUI
 
 struct LibraryView: View {
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
+    @State private var selection: Meeting?
 
     var body: some View {
-        Group {
-            if meetings.isEmpty {
-                ContentUnavailableView {
-                    Label("No meetings yet", systemImage: "mic.slash")
-                } description: {
-                    Text("Click the menubar icon and Start meeting to record one.")
-                }
-            } else {
-                List(meetings) { meeting in
-                    MeetingRow(meeting: meeting)
+        NavigationSplitView {
+            Group {
+                if meetings.isEmpty {
+                    ContentUnavailableView {
+                        Label("No meetings yet", systemImage: "mic.slash")
+                    } description: {
+                        Text("Click the menubar icon and Start meeting to record one.")
+                    }
+                } else {
+                    List(meetings, selection: $selection) { meeting in
+                        MeetingRow(meeting: meeting)
+                            .tag(meeting)
+                    }
                 }
             }
+            .navigationTitle("Library")
+            .frame(minWidth: 280)
+        } detail: {
+            if let selection {
+                MeetingDetailView(meeting: selection)
+            } else {
+                ContentUnavailableView("Select a meeting",
+                                        systemImage: "doc.text",
+                                        description: Text("Choose a meeting on the left to see its summary and transcript."))
+            }
         }
-        .frame(minWidth: 600, minHeight: 400)
-        .navigationTitle("Library")
+        .frame(minWidth: 900, minHeight: 500)
     }
 }
 

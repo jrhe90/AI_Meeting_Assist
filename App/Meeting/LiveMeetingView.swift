@@ -38,6 +38,8 @@ struct LiveMeetingView: View {
             Label("Recording", systemImage: "record.circle.fill").foregroundStyle(.red)
         case .stopping:
             Label("Stopping…", systemImage: "hourglass").foregroundStyle(.secondary)
+        case .summarizing:
+            Label("Summarizing…", systemImage: "sparkles").foregroundStyle(.purple)
         case .error(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
         }
@@ -75,7 +77,7 @@ struct LiveMeetingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-            case .starting, .stopping:
+            case .starting, .stopping, .summarizing:
                 Button("Working…") {}.disabled(true).buttonStyle(.borderedProminent)
             case .running:
                 Button(role: .destructive) {

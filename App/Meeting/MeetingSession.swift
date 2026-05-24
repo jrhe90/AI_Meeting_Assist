@@ -171,6 +171,7 @@ public final class MeetingSession {
         } catch {
             Log.summary.error("Summary generation failed: \(error.localizedDescription, privacy: .public)")
         }
+        MarkdownExporter.export(meeting)
     }
 
     private func attach(summary: MeetingSummary, to meeting: Meeting) {

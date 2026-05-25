@@ -20,7 +20,7 @@ struct MenubarContentView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "waveform")
-                Text("AI Note Taker").font(.headline)
+                Text("Nox").font(.headline)
             }
 
             meetingButton

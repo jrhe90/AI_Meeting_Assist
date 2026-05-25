@@ -46,7 +46,7 @@ struct AINoteTakerApp: App {
         }
         .defaultSize(width: 800, height: 520)
 
-        Window("Welcome to AI Note Taker", id: WindowID.onboarding) {
+        Window("Welcome to Nox", id: WindowID.onboarding) {
             OnboardingHost()
         }
         .windowResizability(.contentSize)

@@ -1,6 +1,8 @@
-# AI Note Taker
+# Nox
 
-A macOS app that records meetings, transcribes them locally, and produces structured summaries. See [`PLAN.md`](PLAN.md) for goals, scope, and build order.
+A macOS app that records meetings, transcribes them locally, and produces structured summaries. Private by default — your audio never leaves your machine. See [`PLAN.md`](PLAN.md) for goals, scope, and build order.
+
+The internal target / repository name is still `AINoteTaker` so existing meetings and TCC permissions carry over; the user-facing brand is **Nox**.
 
 ## Requirements
 

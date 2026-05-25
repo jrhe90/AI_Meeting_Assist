@@ -5,15 +5,15 @@ import SharedKit
 /// to disk.
 ///
 /// While the app remains sandboxed without user-Documents access, exports
-/// land in `~/Library/Containers/com.ainotetaker.app/Data/Documents/AI Note Taker/`.
+/// land in `~/Library/Containers/com.ainotetaker.app/Data/Documents/Nox/`.
 /// Once we add a `user-selected.read-write` entitlement + bookmark flow
-/// the destination becomes the PLAN's `~/Documents/AI Note Taker/`.
+/// the destination becomes `~/Documents/Nox/`.
 public enum MarkdownExporter {
     public static var exportDirectory: URL {
         let docs = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return docs.appendingPathComponent("AI Note Taker", isDirectory: true)
+        return docs.appendingPathComponent("Nox", isDirectory: true)
     }
 
     @MainActor

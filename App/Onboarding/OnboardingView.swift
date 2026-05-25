@@ -130,7 +130,7 @@ private struct WelcomePane: View {
                 Image(systemName: "waveform.circle.fill")
                     .resizable().frame(width: 40, height: 40)
                     .foregroundStyle(.tint)
-                Text("Welcome to AI Note Taker").font(.largeTitle).bold()
+                Text("Welcome to Nox").font(.largeTitle).bold()
             }
             Text("Private, on-device meeting notes for Mac.")
                 .font(.title3).foregroundStyle(.secondary)
@@ -153,11 +153,11 @@ private struct MicrophonePane: View {
             Label("Microphone access", systemImage: "mic.fill")
                 .font(.title).bold()
 
-            Text("AI Note Taker needs to record your microphone so it can transcribe what you say during meetings.")
+            Text("Nox needs to record your microphone so it can transcribe what you say during meetings.")
 
             statusRow(
                 status: model.micStatus,
-                deniedHint: "Open System Settings → Privacy & Security → Microphone and enable AI Note Taker."
+                deniedHint: "Open System Settings → Privacy & Security → Microphone and enable Nox."
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -176,7 +176,7 @@ private struct ScreenRecordingPane: View {
 
             statusRow(
                 status: model.screenStatus,
-                deniedHint: "Open System Settings → Privacy & Security → Screen & System Audio Recording and enable AI Note Taker."
+                deniedHint: "Open System Settings → Privacy & Security → Screen & System Audio Recording and enable Nox."
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -191,7 +191,7 @@ private struct ModelDownloadPane: View {
             Label("Download the speech model", systemImage: "square.and.arrow.down")
                 .font(.title).bold()
 
-            Text("AI Note Taker uses a whisper.cpp model to transcribe meetings on-device. The default is the multilingual small model (\(Self.formatMB(downloader.model.expectedBytes))). You can switch models later in Settings.")
+            Text("Nox uses a whisper.cpp model to transcribe meetings on-device. The default is the multilingual small model (\(Self.formatMB(downloader.model.expectedBytes))). You can switch models later in Settings.")
 
             content
         }
@@ -249,7 +249,7 @@ private struct DonePane: View {
                 .resizable().frame(width: 56, height: 56)
                 .foregroundStyle(.green)
             Text("You're all set").font(.largeTitle).bold()
-            Text("AI Note Taker lives in your menu bar. Click the waveform icon to start a meeting.")
+            Text("Nox lives in your menu bar. Click the waveform icon to start a meeting.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 360)

@@ -4,7 +4,10 @@ import Transcription
 
 struct OnboardingView: View {
     @Bindable var model: OnboardingViewModel
-    @State private var downloader = WhisperModelDownloader(destinationURL: AppPaths.whisperModelURL)
+    @State private var downloader = WhisperModelDownloader(
+        model: Preferences.shared.selectedModel,
+        destinationURL: Preferences.shared.activeModelURL
+    )
     let onFinish: () -> Void
 
     var body: some View {
@@ -188,7 +191,7 @@ private struct ModelDownloadPane: View {
             Label("Download the speech model", systemImage: "square.and.arrow.down")
                 .font(.title).bold()
 
-            Text("AI Note Taker uses whisper.cpp's small.en model to transcribe meetings on-device. The model is about \(Self.expectedMBString) and downloads once.")
+            Text("AI Note Taker uses a whisper.cpp model to transcribe meetings on-device. The default is the multilingual small model (\(Self.formatMB(downloader.model.expectedBytes))). You can switch models later in Settings.")
 
             content
         }
@@ -228,13 +231,9 @@ private struct ModelDownloadPane: View {
         let received = Self.formatMB(downloader.bytesReceived)
         let total = downloader.totalBytes > 0
             ? Self.formatMB(downloader.totalBytes)
-            : Self.formatMB(WhisperModelDownloader.expectedBytes)
+            : Self.formatMB(downloader.model.expectedBytes)
         let pct = Int((downloader.fractionComplete * 100).rounded())
         return "\(received) of \(total) (\(pct)%)"
-    }
-
-    private static var expectedMBString: String {
-        formatMB(WhisperModelDownloader.expectedBytes)
     }
 
     private static func formatMB(_ bytes: Int64) -> String {
@@ -259,6 +258,7 @@ private struct DonePane: View {
     }
 }
 
+@MainActor
 @ViewBuilder
 private func statusRow(status: PermissionStatus, deniedHint: String) -> some View {
     switch status {

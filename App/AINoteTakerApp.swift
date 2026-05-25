@@ -8,6 +8,7 @@ import SwiftUI
 struct AINoteTakerApp: App {
     @Environment(\.openWindow) private var openWindow
     @State private var session: MeetingSession
+    @State private var preferences = Preferences.shared
 
     private let container: ModelContainer
 
@@ -24,7 +25,7 @@ struct AINoteTakerApp: App {
         self.container = resolvedContainer
         let context = ModelContext(resolvedContainer)
         _session = State(initialValue: MeetingSession(
-            modelURL: AppPaths.whisperModelURL,
+            preferences: Preferences.shared,
             modelContext: context
         ))
     }
@@ -56,6 +57,10 @@ struct AINoteTakerApp: App {
                 .modelContainer(container)
         }
         .defaultSize(width: 640, height: 480)
+
+        Settings {
+            SettingsView(preferences: preferences)
+        }
     }
 }
 
@@ -66,16 +71,15 @@ enum WindowID {
     static let liveMeeting = "live-meeting"
 }
 
-/// Canonical filesystem paths the app reads/writes. Centralised so the in-app
-/// downloader (build step 11) can hand back the same URL the engine reads.
+/// Canonical filesystem paths the app reads/writes. The currently active
+/// model URL lives on `Preferences` since the user can switch between
+/// whisper models at runtime.
 enum AppPaths {
-    static var whisperModelURL: URL {
+    static var modelsDirectory: URL {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return support
-            .appendingPathComponent("AINoteTaker/models", isDirectory: true)
-            .appendingPathComponent("ggml-small.en.bin")
+        return support.appendingPathComponent("AINoteTaker/models", isDirectory: true)
     }
 }
 

@@ -29,7 +29,7 @@ public final class MeetingSession {
     public private(set) var segments: [TranscriptSegment] = []
     public private(set) var startedAt: Date?
 
-    private let modelURL: URL
+    private let preferences: Preferences
     private let modelContext: ModelContext
     private let mic = MicCapture()
     private let system = SystemAudioCapture()
@@ -43,8 +43,8 @@ public final class MeetingSession {
     private let systemResampler = PCMResampler()
     private var currentMeeting: Meeting?
 
-    public init(modelURL: URL, modelContext: ModelContext) {
-        self.modelURL = modelURL
+    public init(preferences: Preferences, modelContext: ModelContext) {
+        self.preferences = preferences
         self.modelContext = modelContext
     }
 
@@ -76,7 +76,10 @@ public final class MeetingSession {
             try? modelContext.save()
             currentMeeting = meeting
 
-            let engine = WhisperEngine(modelURL: modelURL)
+            let engine = WhisperEngine(
+                modelURL: preferences.activeModelURL,
+                languageCode: preferences.selectedLanguage.code
+            )
             try await engine.load()
             self.engine = engine
 

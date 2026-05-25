@@ -9,8 +9,10 @@ import Transcription
 struct MenubarContentView: View {
     let session: MeetingSession
     @Environment(\.openWindow) private var openWindow
+    #if DEBUG
     @State private var spike = SpikeController()
     @State private var transcribe = TranscribeController()
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -42,6 +44,16 @@ struct MenubarContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+
+            SettingsLink {
+                Label("Settings…", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(",")
+            .simultaneousGesture(TapGesture().onEnded {
+                NSApp.activate(ignoringOtherApps: true)
+            })
 
             #if DEBUG
             Divider()
@@ -184,17 +196,9 @@ final class TranscribeController {
 
     private(set) var state: State = .idle
 
-    /// Where step 11 will eventually drop the auto-downloaded model. For now
-    /// the user supplies this path manually via the curl command in the README.
-    private var modelURL: URL {
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return support.appendingPathComponent("AINoteTaker/models/ggml-small.en.bin")
-    }
-
     func transcribeLastSpike() {
         state = .running
+        let preferences = Preferences.shared
         Task {
             do {
                 guard let wav = try Self.findMostRecentSystemWAV() else {
@@ -203,7 +207,10 @@ final class TranscribeController {
                     }
                     return
                 }
-                let engine = WhisperEngine(modelURL: modelURL)
+                let engine = WhisperEngine(
+                    modelURL: preferences.activeModelURL,
+                    languageCode: preferences.selectedLanguage.code
+                )
                 let segments = try await engine.transcribe(wavURL: wav, side: .others)
                 let preview = segments.prefix(3).map(\.text).joined(separator: " ")
                 let fullText = segments.map(\.text).joined(separator: " ")
@@ -326,7 +333,7 @@ private struct SpikeDebugRow: View {
     let container = try! ModelContainer(for: schema,
         configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
     return MenubarContentView(session: MeetingSession(
-        modelURL: AppPaths.whisperModelURL,
+        preferences: Preferences.shared,
         modelContext: ModelContext(container)
     ))
 }

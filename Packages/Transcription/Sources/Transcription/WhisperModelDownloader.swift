@@ -20,14 +20,6 @@ public final class WhisperModelDownloader: NSObject {
         case failed(String)
     }
 
-    public static let defaultSourceURL = URL(string:
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
-    )!
-
-    /// Expected final size of `ggml-small.en.bin`. Used to detect a previously
-    /// completed install without a HEAD request.
-    public static let expectedBytes: Int64 = 487_601_967
-
     public private(set) var status: Status = .idle
     public private(set) var bytesReceived: Int64 = 0
     public private(set) var totalBytes: Int64 = 0
@@ -37,7 +29,7 @@ public final class WhisperModelDownloader: NSObject {
         return Double(bytesReceived) / Double(totalBytes)
     }
 
-    public let sourceURL: URL
+    public let model: WhisperModel
     public let destinationURL: URL
 
     private var session: URLSession?
@@ -47,11 +39,8 @@ public final class WhisperModelDownloader: NSObject {
     /// (Not persisted to disk — a relaunched app starts fresh.)
     private var resumeData: Data?
 
-    public init(
-        sourceURL: URL = WhisperModelDownloader.defaultSourceURL,
-        destinationURL: URL
-    ) {
-        self.sourceURL = sourceURL
+    public init(model: WhisperModel, destinationURL: URL) {
+        self.model = model
         self.destinationURL = destinationURL
         super.init()
     }
@@ -61,7 +50,7 @@ public final class WhisperModelDownloader: NSObject {
     public func isAlreadyInstalled() -> Bool {
         let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path)
         guard let size = attrs?[.size] as? NSNumber else { return false }
-        return size.int64Value >= Self.expectedBytes
+        return size.int64Value >= model.expectedBytes
     }
 
     public func start() {
@@ -69,8 +58,8 @@ public final class WhisperModelDownloader: NSObject {
 
         status = .checking
         if isAlreadyInstalled() {
-            bytesReceived = Self.expectedBytes
-            totalBytes = Self.expectedBytes
+            bytesReceived = model.expectedBytes
+            totalBytes = model.expectedBytes
             status = .completed
             Log.whisper.info("Whisper model already present at \(self.destinationURL.path, privacy: .public)")
             return
@@ -100,7 +89,7 @@ public final class WhisperModelDownloader: NSObject {
             task = session.downloadTask(withResumeData: resumeData)
             self.resumeData = nil
         } else {
-            task = session.downloadTask(with: sourceURL)
+            task = session.downloadTask(with: model.sourceURL)
         }
         self.task = task
         status = .downloading
@@ -144,7 +133,7 @@ extension WhisperModelDownloader: URLSessionDownloadDelegate {
             self.bytesReceived = totalBytesWritten
             self.totalBytes = totalBytesExpectedToWrite > 0
                 ? totalBytesExpectedToWrite
-                : Self.expectedBytes
+                : self.model.expectedBytes
         }
     }
 
@@ -171,8 +160,8 @@ extension WhisperModelDownloader: URLSessionDownloadDelegate {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.bytesReceived = Self.expectedBytes
-            self.totalBytes = Self.expectedBytes
+            self.bytesReceived = self.model.expectedBytes
+            self.totalBytes = self.model.expectedBytes
             self.status = .completed
             self.task = nil
             self.session?.finishTasksAndInvalidate()

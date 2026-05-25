@@ -65,14 +65,15 @@ public final class FoundationModelsSummarizer: Summarizing {
 
         let sorted = segments.sorted { $0.start < $1.start }
         let chunks = Self.chunk(sorted, charBudget: chunkCharBudget)
-        Log.summary.info("Summarizing \(sorted.count, privacy: .public) segments in \(chunks.count, privacy: .public) chunk(s)")
+        let language = Self.detectLanguage(in: sorted)
+        Log.summary.info("Summarizing \(sorted.count, privacy: .public) segments in \(chunks.count, privacy: .public) chunk(s), language=\(language.rawValue, privacy: .public)")
 
         guard !chunks.isEmpty else {
             return MeetingSummary(tldr: "No speech was captured.", decisions: [], actionItems: [], topics: [])
         }
 
         if chunks.count == 1 {
-            return try await summarizeChunk(chunks[0])
+            return try await summarizeChunk(chunks[0], language: language)
         }
 
         // Hierarchical: summarize each chunk, then ask the model to merge
@@ -81,34 +82,44 @@ public final class FoundationModelsSummarizer: Summarizing {
         partials.reserveCapacity(chunks.count)
         for (index, chunk) in chunks.enumerated() {
             Log.summary.info("Summarizing chunk \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
-            let partial = try await summarizeChunk(chunk)
+            let partial = try await summarizeChunk(chunk, language: language)
             partials.append(partial)
         }
-        return try await mergePartials(partials)
+        return try await mergePartials(partials, language: language)
     }
 
     // MARK: - Chunk-level summarization
 
-    private func summarizeChunk(_ segments: [TranscriptSegment]) async throws -> MeetingSummary {
+    private func summarizeChunk(_ segments: [TranscriptSegment], language: TranscriptLanguage) async throws -> MeetingSummary {
         let transcript = Self.formatTranscript(segments)
         guard !transcript.isEmpty else {
             return MeetingSummary(tldr: "", decisions: [], actionItems: [], topics: [])
         }
 
         let instructions = """
+        \(language.responseInstruction)
+
         You are a careful note-taker summarizing a meeting transcript. The
         transcript is tagged with [Me] (this user's microphone) and [Others]
         (system audio — anything from other participants or video calls).
         Produce a structured summary. Be specific; cite what was actually
         said rather than generalising. If a category has nothing to put in
         it, return an empty list.
+
+        All fields you produce (tldr, decisions, action items, topics,
+        bullets) MUST be written in the same language as the transcript:
+        \(language.humanName).
         """
 
         let session = LanguageModelSession(model: .default, instructions: instructions)
 
         do {
             let response = try await session.respond(
-                to: "Summarize the following meeting transcript:\n\n\(transcript)",
+                to: """
+                Summarize the following meeting transcript. Reply entirely in \(language.humanName).
+
+                \(transcript)
+                """,
                 generating: GeneratedMeetingSummary.self
             )
             return Self.translate(response.content)
@@ -120,23 +131,31 @@ public final class FoundationModelsSummarizer: Summarizing {
 
     // MARK: - Merging partial summaries
 
-    private func mergePartials(_ partials: [MeetingSummary]) async throws -> MeetingSummary {
+    private func mergePartials(_ partials: [MeetingSummary], language: TranscriptLanguage) async throws -> MeetingSummary {
         let prompt = Self.formatPartialSummaries(partials)
 
         let instructions = """
+        \(language.responseInstruction)
+
         You are merging partial summaries of one meeting that was processed
         in chunks. Produce a single unified summary: combine the chunk
         TL;DRs into a coherent 1-3 sentence overview, deduplicate decisions
         and action items, and merge topics that overlap (similar titles or
         bullets) while preserving distinct ones. Do not invent content that
         is not present in the partial summaries.
+
+        All fields you produce MUST be written in \(language.humanName).
         """
 
         let session = LanguageModelSession(model: .default, instructions: instructions)
 
         do {
             let response = try await session.respond(
-                to: "Merge these partial summaries into one final meeting summary:\n\n\(prompt)",
+                to: """
+                Merge these partial summaries into one final meeting summary. Reply entirely in \(language.humanName).
+
+                \(prompt)
+                """,
                 generating: GeneratedMeetingSummary.self
             )
             return Self.translate(response.content)
@@ -162,6 +181,68 @@ public final class FoundationModelsSummarizer: Summarizing {
     }
 
     // MARK: - Helpers
+
+    /// Rough script-based detection of the transcript's dominant language so
+    /// we can ask Foundation Models to respond in kind. Counts characters by
+    /// Unicode block: CJK ideographs → Chinese, hiragana/katakana → Japanese,
+    /// Hangul → Korean, Cyrillic → Russian, otherwise default to English.
+    /// Good enough to pick the right response language; not a real classifier.
+    enum TranscriptLanguage: String, Sendable {
+        case english
+        case chinese
+        case japanese
+        case korean
+        case russian
+
+        var responseInstruction: String {
+            switch self {
+            case .english:  return "Respond in English."
+            case .chinese:  return "IMPORTANT: Respond entirely in Simplified Chinese. 请用简体中文回答所有内容，包括标题、要点、决定和任务。不要使用任何英文。"
+            case .japanese: return "IMPORTANT: Respond entirely in Japanese. すべての回答を日本語で書いてください。タイトル、要点、決定事項、アクション項目を含めて、英語は使わないでください。"
+            case .korean:   return "IMPORTANT: Respond entirely in Korean. 모든 답변을 한국어로 작성하세요. 제목, 요점, 결정 사항, 작업 항목을 포함하여 영어를 사용하지 마세요."
+            case .russian:  return "IMPORTANT: Respond entirely in Russian. Все ответы должны быть на русском языке."
+            }
+        }
+
+        var humanName: String {
+            switch self {
+            case .english:  return "English"
+            case .chinese:  return "Simplified Chinese (简体中文)"
+            case .japanese: return "Japanese (日本語)"
+            case .korean:   return "Korean (한국어)"
+            case .russian:  return "Russian (русский)"
+            }
+        }
+    }
+
+    static func detectLanguage(in segments: [TranscriptSegment]) -> TranscriptLanguage {
+        var counts: [TranscriptLanguage: Int] = [:]
+        for segment in segments {
+            for scalar in segment.text.unicodeScalars {
+                let v = scalar.value
+                switch v {
+                // CJK Unified Ideographs (basic block) + Extension A.
+                case 0x4E00...0x9FFF, 0x3400...0x4DBF:
+                    counts[.chinese, default: 0] += 1
+                // Hiragana + Katakana.
+                case 0x3040...0x309F, 0x30A0...0x30FF:
+                    counts[.japanese, default: 0] += 1
+                // Hangul syllables + Jamo.
+                case 0xAC00...0xD7AF, 0x1100...0x11FF:
+                    counts[.korean, default: 0] += 1
+                // Cyrillic (basic + supplement).
+                case 0x0400...0x04FF, 0x0500...0x052F:
+                    counts[.russian, default: 0] += 1
+                default:
+                    break
+                }
+            }
+        }
+        // Japanese mixes hiragana/katakana with CJK; if both are present and
+        // there are any kana, call it Japanese.
+        if (counts[.japanese] ?? 0) > 0 { return .japanese }
+        return counts.max(by: { $0.value < $1.value })?.key ?? .english
+    }
 
     private static func assertModelAvailable() throws {
         let model = SystemLanguageModel.default

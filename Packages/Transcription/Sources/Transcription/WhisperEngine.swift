@@ -12,9 +12,11 @@ import whisper
 public actor WhisperEngine: Transcribing {
     private var ctx: OpaquePointer?
     private let modelURL: URL
+    private let languageCode: String?  // nil / "" / "auto" all mean auto-detect
 
-    public init(modelURL: URL) {
+    public init(modelURL: URL, languageCode: String? = nil) {
         self.modelURL = modelURL
+        self.languageCode = (languageCode?.isEmpty == true) ? nil : languageCode
     }
 
     isolated deinit {
@@ -66,10 +68,18 @@ public actor WhisperEngine: Transcribing {
         params.single_segment = false
         params.no_context = true
         params.suppress_blank = true
-        params.language = ("en" as NSString).utf8String
+
+        // `language = nil` is whisper's auto-detect path. A specific code
+        // ("en", "zh", "ja", …) constrains decoding for tighter quality.
+        // Keep the language string alive for the duration of whisper_full —
+        // params.language is just a borrowed pointer.
+        let languageNS: NSString? = languageCode.map { $0 as NSString }
+        params.language = languageNS?.utf8String
 
         let status = samples.withUnsafeBufferPointer { buf -> Int32 in
-            whisper_full(ctx, params, buf.baseAddress, Int32(buf.count))
+            withExtendedLifetime(languageNS) {
+                whisper_full(ctx, params, buf.baseAddress, Int32(buf.count))
+            }
         }
         guard status == 0 else {
             throw TranscriptionError.decodeFailed(reason: "whisper_full returned \(status)")

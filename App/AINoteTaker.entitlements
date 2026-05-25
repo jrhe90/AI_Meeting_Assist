@@ -10,5 +10,13 @@
          after onboarding to support future Claude API opt-in (PLAN §3). -->
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- The bundled whisper.cpp xcframework is built and signed by
+         build-xcframework.sh with a placeholder team ID, so the hardened
+         runtime's library validation rejects loading it under the app's
+         Personal-Team signature. Disabling library validation lets us
+         load it. Step 12's notarized build flow re-signs the framework
+         with the proper Developer ID, at which point we can remove this. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
 </dict>
 </plist>

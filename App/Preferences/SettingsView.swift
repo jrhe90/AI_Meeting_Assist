@@ -34,20 +34,10 @@ struct SettingsView: View {
             }
 
             Section("Language") {
-                Picker("Default language", selection: $preferences.selectedLanguage) {
-                    ForEach(WhisperLanguage.all) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-                .disabled(!preferences.selectedModel.isMultilingual && preferences.selectedLanguage != .english && preferences.selectedLanguage != .auto)
-
-                if !preferences.selectedModel.isMultilingual {
-                    Text("This model only supports English. Switch to a multilingual model to use other languages.")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if preferences.selectedLanguage.isAuto {
-                    Text("Whisper detects the language per chunk. Best for mixed-language meetings; specific languages give tighter quality.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                Label("Detected automatically per meeting", systemImage: "wand.and.stars")
+                    .foregroundStyle(.secondary)
+                Text("The first transcribed chunk decides which language the meeting is in; subsequent chunks reuse it. Multilingual models handle 99 languages; the English-only model is fixed to English.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

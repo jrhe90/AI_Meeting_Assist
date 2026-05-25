@@ -207,10 +207,7 @@ final class TranscribeController {
                     }
                     return
                 }
-                let engine = WhisperEngine(
-                    modelURL: preferences.activeModelURL,
-                    languageCode: preferences.selectedLanguage.code
-                )
+                let engine = WhisperEngine(modelURL: preferences.activeModelURL)
                 let segments = try await engine.transcribe(wavURL: wav, side: .others)
                 let preview = segments.prefix(3).map(\.text).joined(separator: " ")
                 let fullText = segments.map(\.text).joined(separator: " ")

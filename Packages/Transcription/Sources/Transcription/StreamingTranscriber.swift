@@ -21,6 +21,7 @@ public actor StreamingTranscriber {
     private let side: SpeakerSide
     private let chunkDurationSamples: Int
     private let silenceRMSThreshold: Float
+    private let languagePin: LanguagePin
 
     private var buffer: [Float] = []
     private var chunkOffsetSeconds: TimeInterval = 0
@@ -31,11 +32,13 @@ public actor StreamingTranscriber {
     public init(
         engine: WhisperEngine,
         side: SpeakerSide,
+        languagePin: LanguagePin,
         chunkDuration: TimeInterval = 10,
         silenceRMSThreshold: Float = 0.003
     ) {
         self.engine = engine
         self.side = side
+        self.languagePin = languagePin
         self.chunkDurationSamples = Int(chunkDuration * 16_000)
         self.silenceRMSThreshold = silenceRMSThreshold
         (self.segments, self.continuation) = AsyncStream.makeStream(of: TranscriptSegment.self)
@@ -76,9 +79,21 @@ public actor StreamingTranscriber {
 
     private func transcribe(chunk: [Float], offset: TimeInterval) async {
         guard rms(chunk) >= silenceRMSThreshold else { return }
+        // Read the pin BEFORE the call. nil → whisper auto-detects;
+        // a code → whisper uses it directly (faster + more accurate).
+        let languageHint = languagePin.code
         do {
-            let produced = try await engine.transcribeRaw(samples: chunk, side: side, baseTime: offset)
-            for seg in produced { continuation.yield(seg) }
+            let output = try await engine.transcribeRaw(
+                samples: chunk,
+                side: side,
+                baseTime: offset,
+                language: languageHint
+            )
+            // First successful detection on either side wins the pin.
+            if let detected = output.detectedLanguage {
+                languagePin.setIfEmpty(detected)
+            }
+            for seg in output.segments { continuation.yield(seg) }
         } catch {
             Log.whisper.error("Stream chunk failed at offset \(offset, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }

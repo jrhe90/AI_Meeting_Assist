@@ -10,13 +10,20 @@ import whisper
 /// 16 kHz mono Float32 — via `AVAudioConverter` before being handed to
 /// `whisper_full`.
 public actor WhisperEngine: Transcribing {
+    /// Result of a single transcription call. `detectedLanguage` is whisper's
+    /// own ID for the language it used during the call (whether forced or
+    /// auto-detected). Callers can feed this into a `LanguagePin` so future
+    /// chunks skip auto-detect and run faster + more accurately.
+    public struct TranscribeOutput: Sendable {
+        public let segments: [TranscriptSegment]
+        public let detectedLanguage: String?
+    }
+
     private var ctx: OpaquePointer?
     private let modelURL: URL
-    private let languageCode: String?  // nil / "" / "auto" all mean auto-detect
 
-    public init(modelURL: URL, languageCode: String? = nil) {
+    public init(modelURL: URL) {
         self.modelURL = modelURL
-        self.languageCode = (languageCode?.isEmpty == true) ? nil : languageCode
     }
 
     isolated deinit {
@@ -44,18 +51,23 @@ public actor WhisperEngine: Transcribing {
     public func transcribe(wavURL: URL, side: SpeakerSide) async throws -> [TranscriptSegment] {
         let pcm = try Self.readAndResample(url: wavURL)
         Log.whisper.info("Transcribing \(wavURL.lastPathComponent, privacy: .public): \(pcm.count, privacy: .public) samples at 16kHz")
-        return try transcribeRaw(samples: pcm, side: side, baseTime: 0)
+        return try transcribeRaw(samples: pcm, side: side, baseTime: 0, language: nil).segments
     }
 
     /// Transcribe a chunk of already-resampled 16 kHz mono Float32 samples.
     /// Used by `StreamingTranscriber`, which does its own format conversion.
-    /// `baseTime` shifts the segment timestamps so chunks line up on the
-    /// caller's clock instead of always starting at 0.
+    ///
+    /// `baseTime` shifts segment timestamps onto the caller's meeting clock.
+    /// `language` is the per-call override: nil / "" runs whisper's
+    /// auto-detect, a specific code ("en", "zh", "ja", …) constrains
+    /// decoding for tighter quality. The detected language used for the
+    /// call comes back in the return value so callers can pin future calls.
     public func transcribeRaw(
         samples: [Float],
         side: SpeakerSide,
-        baseTime: TimeInterval
-    ) throws -> [TranscriptSegment] {
+        baseTime: TimeInterval,
+        language: String?
+    ) throws -> TranscribeOutput {
         if ctx == nil { try load() }
         guard let ctx else { throw TranscriptionError.loadFailed(reason: "context unavailable after load") }
 
@@ -68,12 +80,14 @@ public actor WhisperEngine: Transcribing {
         params.single_segment = false
         params.no_context = true
         params.suppress_blank = true
+        // suppress_nst drops non-speech tokens (BLANK_AUDIO, Music, etc.)
+        // during decoding instead of after; reduces hallucinated loops.
+        params.suppress_nst = true
 
-        // `language = nil` is whisper's auto-detect path. A specific code
-        // ("en", "zh", "ja", …) constrains decoding for tighter quality.
         // Keep the language string alive for the duration of whisper_full —
-        // params.language is just a borrowed pointer.
-        let languageNS: NSString? = languageCode.map { $0 as NSString }
+        // params.language is a borrowed pointer.
+        let normalized = (language?.isEmpty == true) ? nil : language
+        let languageNS: NSString? = normalized.map { $0 as NSString }
         params.language = languageNS?.utf8String
 
         let status = samples.withUnsafeBufferPointer { buf -> Int32 in
@@ -85,6 +99,16 @@ public actor WhisperEngine: Transcribing {
             throw TranscriptionError.decodeFailed(reason: "whisper_full returned \(status)")
         }
 
+        // Pull the language whisper actually used out of the context, so the
+        // caller can pin it for the rest of the meeting.
+        let detected: String?
+        let langId = whisper_full_lang_id(ctx)
+        if langId >= 0, let cStr = whisper_lang_str(langId) {
+            detected = String(cString: cStr)
+        } else {
+            detected = nil
+        }
+
         let nSegments = whisper_full_n_segments(ctx)
         var segments: [TranscriptSegment] = []
         segments.reserveCapacity(Int(nSegments))
@@ -93,7 +117,7 @@ public actor WhisperEngine: Transcribing {
             let t1 = whisper_full_get_segment_t1(ctx, i)
             let text = String(cString: whisper_full_get_segment_text(ctx, i))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
+            guard !text.isEmpty, !Self.isArtifact(text) else { continue }
             segments.append(TranscriptSegment(
                 side: side,
                 start: baseTime + TimeInterval(t0) / 100.0,
@@ -101,7 +125,23 @@ public actor WhisperEngine: Transcribing {
                 text: text
             ))
         }
-        return segments
+        return TranscribeOutput(segments: segments, detectedLanguage: detected)
+    }
+
+    /// Whisper sometimes emits placeholder tokens for silence, music, or
+    /// audio it can't identify. Drop these before they reach the UI.
+    private static func isArtifact(_ text: String) -> Bool {
+        let stripped = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        // Bracketed placeholders: [BLANK_AUDIO], [Music], [silence], etc.
+        if stripped.hasPrefix("[") && stripped.hasSuffix("]") { return true }
+        // Parenthesised hints whisper uses when it cannot transcribe:
+        // (speaking in foreign language), (music playing), (laughter), etc.
+        if stripped.hasPrefix("(") && stripped.hasSuffix(")") {
+            return true
+        }
+        return false
     }
 
     // MARK: - Audio decoding

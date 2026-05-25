@@ -76,14 +76,16 @@ public final class MeetingSession {
             try? modelContext.save()
             currentMeeting = meeting
 
-            let engine = WhisperEngine(
-                modelURL: preferences.activeModelURL,
-                languageCode: preferences.selectedLanguage.code
-            )
+            let engine = WhisperEngine(modelURL: preferences.activeModelURL)
             try await engine.load()
             self.engine = engine
 
-            let systemStreamer = StreamingTranscriber(engine: engine, side: .others)
+            // One pin per meeting, shared across both transcribers — first
+            // successful detection on either side decides the language for
+            // the rest of the meeting.
+            let pin = LanguagePin()
+
+            let systemStreamer = StreamingTranscriber(engine: engine, side: .others, languagePin: pin)
             self.systemStreamer = systemStreamer
             let systemResampler = self.systemResampler
             try await system.start { [systemStreamer, systemResampler] buffer in
@@ -98,7 +100,7 @@ public final class MeetingSession {
 
             // Mic is best-effort. If no device is available we degrade
             // to system-only rather than failing the whole meeting.
-            let micStreamer = StreamingTranscriber(engine: engine, side: .me)
+            let micStreamer = StreamingTranscriber(engine: engine, side: .me, languagePin: pin)
             let micResampler = self.micResampler
             do {
                 try await mic.start { [micStreamer, micResampler] buffer in

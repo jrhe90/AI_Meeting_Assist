@@ -58,7 +58,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ainotetaker.app
-        PRODUCT_NAME: AINoteTaker
+        PRODUCT_NAME: Nox
         CODE_SIGN_ENTITLEMENTS: App/AINoteTaker.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
